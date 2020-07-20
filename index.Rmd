@@ -1,30 +1,220 @@
 ---
 title: "Practical Machine Learning Course Project"
 author: "Jessica Caroline Dias Nascimento"
-date: "July 19, 2020"
+date: "July 20, 2020"
 output: html_document
 ---
 
-```{r setup, include=FALSE}
-knitr::opts_chunk$set(echo = TRUE)
+## Summary
+
+This document is the final project from Coursera’s course *Practical Machine Learning*: <https://www.coursera.org/learn/practical-machine-learning>.
+
+It was developed in R and RStudio, using its Knit functions, meant to be published in html format. This analysis meant to be the basis for the course final quiz and a prediction assignment writeup.
+
+
+Project flow:
+
+I. Business Understanding
+II. Enviromnment Preparation
+III.Data Collection and Data Preparation
+IV. Modeling and Model Evaluation
+V. Applying the best model
+VI. Quiz Result
+
+
+## I. Business Understanding
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement – a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it.
+
+The main goal of the project is to predict the manner in which 6 participants, using accelerometers located on belt, forearm and arm, performed barbell lifts correctly and incorrectly in 5 different ways:
+* Exactly according to the specification (Class A)
+* Throwing the elbows to the front (Class B)
+* Lifting the dumbbell only halfway (Class C)
+* Lowering the dumbbell only halfway (Class D)
+* Throwing the hips to the front (Class E)
+
+More information is available from the website here: <http://groupware.les.inf.puc-rio.br/har> (see the section on the Weight Lifting Exercise Dataset).
+
+**Question:** Create a model to predict the manner in which the subjects did the exercise using the accelerometer data as predictors. The outcome to be predicted is the “classe” variable.
+
+## II. Enviromnment Preparation
+Set working directory.
+
+```{r }
+setwd("C:/Users/JessicaDias/Documents/DataScience/practical-machine-learning")
 ```
 
-## R Markdown
+Load the R libraries which are necessary for the complete analysis and set a seed.
 
-This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+```{r }
+library(knitr)
+library(caret)
+library(rpart)
+library(rpart.plot)
+library(rattle)
+library(randomForest)
+library(corrplot)
 
-When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
-
-```{r cars}
-summary(cars)
+set.seed(12345)
 ```
 
-## Including Plots
+## III. Data Collection and Data Preparation
 
-You can also embed plots, for example:
+The training data for this project: <https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv>
 
-```{r pressure, echo=FALSE}
-plot(pressure)
+The test data for this project: <https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv>
+
+The full reference is as follows:
+Velloso, E.; Bulling, A.; Gellersen, H.; Ugulino, W.; Fuks, H. **Qualitative Activity Recognition of Weight Lifting Exercises.** Proceedings of 4th International Conference in Cooperation with SIGCHI (Augmented Human ’13)”. Stuttgart, Germany: ACM SIGCHI, 2013.
+
+```{r }
+# set the URL for the download
+UrlTrain <- "http://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"
+UrlTest  <- "http://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"
+
+# download the datasets
+training <- read.csv(url(UrlTrain))
+testing  <- read.csv(url(UrlTest))
+
+dim(training)
+dim(testing)
 ```
 
-Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
+
+
+**a) Reduce the number of features**
+
+There are invalid values that can be removed with the Near Zero variance (NZV) and identification features.
+
+```{r }
+# remove variables with Nearly Zero Variance
+NZV <- nearZeroVar(training)
+training <- training[, -NZV]
+
+# remove variables that are mostly NA
+AllNA    <- sapply(training, function(x) mean(is.na(x))) > 0.95
+training <- training[, AllNA == FALSE]
+
+# remove identification variables (columns 1 to 5)
+training <- training[, -(1:5)]
+
+dim(training)
+```
+
+The number of features for the analysis has been reduced from the original 160 to 54.
+*Note: The testing dataset was not changed and will only be used for the quiz results.*
+
+
+
+**b) Slicing the dataset**
+
+```{r }
+# create a partition with the training dataset (80% training and 20% test)
+inTrain  <- createDataPartition(training$classe, p=0.8, list=FALSE)
+TrainSet <- training[inTrain, ]
+TestSet  <- training[-inTrain, ]
+
+dim(TrainSet)
+dim(TestSet)
+```
+
+
+
+**c) Correlation analysis**
+
+The highly correlated features are shown in dark colors in the graph bellow.
+
+```{r }
+corMatrix <- cor(TrainSet[, -54])
+corrplot(corMatrix, order = "FPC", method = "color", type = "lower", 
+         tl.cex = 0.8, tl.col = rgb(0, 0, 0))
+```
+
+Dimensionality reduction is part of data pre-processing and PCA (Principal Components Analysis) could be performed to reduce more features. Nevertheless, as there are few strong correlations among the features, this step will not be applied for this assignment.
+
+
+
+## IV. Modeling and Model Evaluation
+
+Decision Tree,  Random Forest and Generalized Boosted models will be applied to TrainSet and the method with higher accuracy when applied to the TestSet will be used for the quiz predictions.
+
+
+
+**a) Decision Tree**
+
+```{r }
+# model fit
+set.seed(12345)
+modelDecisionTree <- rpart(classe ~ ., data=TrainSet, method="class")
+fancyRpartPlot(modelDecisionTree)
+```
+
+```{r }
+# prediction on TestSet
+predictDecisionTree <- predict(modelDecisionTree, newdata=TestSet, type="class")
+matrixDecisionTree <- confusionMatrix(predictDecisionTree, TestSet$classe)
+matrixDecisionTree
+```
+
+
+
+
+**b) Random Forest**
+
+*Note: Using Cross Validation method.*
+```{r }
+# model fit
+set.seed(12345)
+controlRF <- trainControl(method="cv", number=3, verboseIter=FALSE)
+modelRandomForest <- train(classe ~ ., data=TrainSet, method="rf",
+                          trControl=controlRF)
+modelRandomForest$finalModel
+```
+
+```{r }
+# prediction on Test dataset
+predictRandomForest <- predict(modelRandomForest, newdata=TestSet)
+matrixRandomForest <- confusionMatrix(predictRandomForest, TestSet$classe)
+matrixRandomForest
+```
+
+
+
+**c) Generalized Boosted Model**
+
+*Note: Using Repeated Cross Validation method.*
+```{r }
+# model fit
+set.seed(12345)
+controlGBM <- trainControl(method = "repeatedcv", number = 5, repeats = 1)
+modelGBM  <- train(classe ~ ., data=TrainSet, method = "gbm",
+                    trControl = controlGBM, verbose = FALSE)
+modelGBM$finalModel
+```
+
+```{r }
+# prediction on Test dataset
+predictGBM <- predict(modelGBM, newdata=TestSet)
+matrixGBM <- confusionMatrix(predictGBM, TestSet$classe)
+matrixGBM
+```
+
+
+
+## V. Applying the best model
+
+The accuracy of the 3 modeling methods are:
+
+a) Decision Tree : **0.727**
+b) Random Forest : **0.9982**
+c) Generalized Boosted model: **0.9906**
+
+As a result, the Random Forest model will be applied to predict the quiz (testing dataset).
+
+
+
+## VI. Quiz result
+
+```{r }
+predictTesting <- predict(modelRandomForest, newdata=testing)
+predictTesting
+```
