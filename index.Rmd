@@ -160,6 +160,7 @@ matrixDecisionTree
 **b) Random Forest**
 
 *Note: Using Cross Validation method.*
+
 ```{r }
 # model fit
 set.seed(12345)
