@@ -157,7 +157,6 @@ matrixDecisionTree
 
 
 
-
 **b) Random Forest**
 
 *Note: Using Cross Validation method.*
